@@ -47,16 +47,19 @@ app.get('/courses', async (req, res) => {
 });
 
 // returns false if doesn't exist
-function findUser(id, username, password) {
+function findUser(id, username, password=false) {
     if (id) {
         for (let obj of users) {
-            if (obj.id === id) {
+            if (obj.id == id) {
                 return obj // reference
             }
         }
     } else {
         for (let obj of users) {
-            if (obj.username === username && obj.password === password) {
+            if (obj.username === username) {
+                if (password && obj.password != password) {
+                    continue
+                }
                 return {"userId": obj.id}
             }
         }
@@ -66,14 +69,20 @@ function findUser(id, username, password) {
 
 app.get("/account/:id", (req, res) => {
     let user = findUser(Number(req.params.id))
+    let response
     if (!user) {
-        user = {"error": "id doesn't exist"}
+        res.status(404)
+        response = {"error": "id doesn't exist"}
+    } else {
+        response = {
+            "user": {
+                username: user.username,
+                id: user.id,
+                courses: user.courses
+            }
+        }
     }
-    res.send({
-        username: user.username,
-        id: user.id,
-        courses: user.courses
-    })
+    res.send(response)
 })
 
 app.post("/users/login", (req, res) => {
@@ -95,7 +104,7 @@ app.post("/users/login", (req, res) => {
 app.post("/users/signup", (req, res) => {
     let username = req.body.username,
         password = req.body.password
-    let userId = findUser(false, username, password)
+    let userId = findUser(false, username)
     let response
     if (userId) {
         response = {error: "username already in use"}
@@ -111,58 +120,64 @@ app.post("/users/signup", (req, res) => {
     res.send(response);
 })
 
-app.patch("/account/:id/courses/add", (req, res) => {
-    try {
-        // check if course exists
-        let reqcourse = req.body.course
-        console.log(req.body.course)
-        if (!reqcourse) {
-            res.status(400)
-            res.send({"error": "invalid request body"})
-            return
-        }
+app.patch("/account/:id/courses/:action", (req, res) => {
+    let action = req.params.action
+    if (action !== "add" && action !== "remove") {
+        res.redirect("fake path")
+        return
+    }
 
+    let reqcourse = req.body;
 
-        // check if valid id
-        let user = findUser(Number(req.params.id))
-        if (!user) {
-            res.status(401)
-            res.send({"error": "id doesn't exist"})
-            return
-        } 
+    // check if request course is valid
+    let course_to_add = courses.find(course => 
+        course.code === reqcourse.code &&
+        course.num === reqcourse.num &&
+        course.name === reqcourse.name
+    );
+    if (!course_to_add) {
+        res.status(400)
+        res.send({"error": "course doesn't exist"})
+        return
+    }
 
-        // check if course exists
-        let course_to_add = courses.find(course => 
-            course.code === reqcourse.code &&
-            course.num === reqcourse.num &&
-            course.name === reqcourse.name
-        );
-        if (!course_to_add) {
-            res.status(400)
-            res.send({"error": "course doesn't exist"})
-            return
-        }
+    // check if valid id
+    let user = findUser(Number(req.params.id))
+    if (!user) {
+        res.status(401)
+        res.send({"error": "id doesn't exist"})
+        return
+    } 
 
-        // check if already in users course list
-        if (user.courses.find(c => 
-            c.code === course_to_add.code &&
-            c.num === course_to_add.num &&
-            c.name === course_to_add.name))
-        {
-            res.status(409)
-            res.send({"error": "course already in user list"})
-            return
-        }
-        // else add to user courses
-        // note that user is reference to obj in users
+    // check if course is in users course list
+    let course_index = user.courses.findIndex(c => 
+        c.code === course_to_add.code &&
+        c.num === course_to_add.num &&
+        c.name === course_to_add.name);
+    if (action == "add" && course_index != -1)
+    {
+        res.status(409)
+        res.send({"error": "course already in user list"})
+        return
+    }
+    if (action == "remove" && course_index == -1) {
+        res.status(409)
+        res.send({"error": "course not in user list"})
+        return
+    }
+
+    // else add to/remove from user courses
+    // note that user is reference to obj in users
+    if (action == "add") {
         user.courses.push(JSON.parse(JSON.stringify(course_to_add)))
         fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 4), "utf-8")
         res.status(201)
         res.send({courses: user.courses})
-
-    }   catch(e) {
-
-        console.log(e);
+    } else {
+        user.courses.splice(course_index, 1);
+        fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 4), "utf-8")
+        res.status(200)
+        res.send({courses: user.courses})
     }
 });
 
